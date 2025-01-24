@@ -4,12 +4,12 @@
 <details>
 <summary>
 
-# Como executar os testes
+## 🧪 Como executar os testes
 
 </summary>
 
-Execute o comando `mvn clean install org.pitest:pitest-maven:mutationCoverage`
-O resultado devera ser algo desse tipo:
+Execute o comando `mvn clean install org.pitest:pitest-maven:mutationCoverage`.
+O output deve ser semelhante ao log abaixo
 
 
 
@@ -254,13 +254,14 @@ Enhanced functionality available at https://www.arcmutate.com/
 <details>
 <summary>
 
-# Como verficar a cobertura dos testes
+## 🤔 Como verficar a cobertura dos testes
 
 </summary>
 
 ### Abra o arquivo no navegador
 ![image](public/jacoco-folder.png)
-Os resultados deverão ser algo do tipo:
+
+Os resultados deverão ser semelhantes a seguinte imagem:
 ![image](public/jacoco-compra-site.png)
 
 </details>
@@ -268,13 +269,14 @@ Os resultados deverão ser algo do tipo:
 <details>
 <summary>
 
-# Como verficar os mutantes mortos
+## ☠️ Como verficar se os mutantes foram mortos
 
 </summary>
 
 ### Abra o arquivo no navegador
 ![image](public/pit-folder.png)
-Os resultados deverão ser algo do tipo:
+
+Os resultados deverão ser semelhantes a seguinte imagem:
 ![image](public/pit-compra-results.png)
 
 </details>
