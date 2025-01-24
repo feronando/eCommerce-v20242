@@ -1,112 +1,116 @@
 package ecommerce.service;
 
-import java.math.BigDecimal;
-import java.util.List;
-import java.util.stream.Collectors;
-
-import ecommerce.entity.TipoCliente;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.stereotype.Service;
-
 import ecommerce.dto.CompraDTO;
 import ecommerce.dto.DisponibilidadeDTO;
 import ecommerce.dto.EstoqueBaixaDTO;
 import ecommerce.dto.PagamentoDTO;
 import ecommerce.entity.CarrinhoDeCompras;
 import ecommerce.entity.Cliente;
+import ecommerce.entity.TipoCliente;
 import ecommerce.external.IEstoqueExternal;
 import ecommerce.external.IPagamentoExternal;
+import ecommerce.util.exception.ProdutoNaoEncontradoException;
 import jakarta.transaction.Transactional;
+import org.springframework.stereotype.Service;
+
+import java.math.BigDecimal;
+import java.util.List;
+import java.util.stream.Collectors;
 
 @Service
 public class CompraService {
 
-	private final CarrinhoDeComprasService carrinhoService;
-	private final ClienteService clienteService;
+    private final CarrinhoDeComprasService carrinhoService;
+    private final ClienteService clienteService;
 
-	private final IEstoqueExternal estoqueExternal;
-	private final IPagamentoExternal pagamentoExternal;
+    private final IEstoqueExternal estoqueExternal;
+    private final IPagamentoExternal pagamentoExternal;
 
-	@Autowired
-	public CompraService(CarrinhoDeComprasService carrinhoService, ClienteService clienteService,
-			IEstoqueExternal estoqueExternal, IPagamentoExternal pagamentoExternal) {
-		this.carrinhoService = carrinhoService;
-		this.clienteService = clienteService;
+    public CompraService(CarrinhoDeComprasService carrinhoService, ClienteService clienteService,
+                         IEstoqueExternal estoqueExternal, IPagamentoExternal pagamentoExternal) {
+        this.carrinhoService = carrinhoService;
+        this.clienteService = clienteService;
 
-		this.estoqueExternal = estoqueExternal;
-		this.pagamentoExternal = pagamentoExternal;
-	}
+        this.estoqueExternal = estoqueExternal;
+        this.pagamentoExternal = pagamentoExternal;
+    }
 
-	@Transactional
-	public CompraDTO finalizarCompra(Long carrinhoId, Long clienteId) {
-		Cliente cliente = clienteService.buscarPorId(clienteId);
-		CarrinhoDeCompras carrinho = carrinhoService.buscarPorCarrinhoIdEClienteId(carrinhoId, cliente);
+    @Transactional
+    public CompraDTO finalizarCompra(Long carrinhoId, Long clienteId) {
+        Cliente cliente = clienteService.buscarPorId(clienteId);
+        CarrinhoDeCompras carrinho = carrinhoService.buscarPorCarrinhoIdEClienteId(carrinhoId, cliente);
 
-		List<Long> produtosIds = carrinho.getItens().stream().map(i -> i.getProduto().getId())
-				.collect(Collectors.toList());
-		List<Long> produtosQtds = carrinho.getItens().stream().map(i -> i.getQuantidade()).collect(Collectors.toList());
+        List<Long> produtosIds = carrinho.getItens().stream().map(i -> i.getProduto().getId())
+                .collect(Collectors.toList());
+        List<Long> produtosQtds = carrinho.getItens().stream().map(i -> i.getQuantidade()).collect(Collectors.toList());
 
-		DisponibilidadeDTO disponibilidade = estoqueExternal.verificarDisponibilidade(produtosIds, produtosQtds);
+        DisponibilidadeDTO disponibilidade = estoqueExternal.verificarDisponibilidade(produtosIds, produtosQtds);
 
-		if (!disponibilidade.disponivel()) {
-			throw new IllegalStateException("Itens fora de estoque.");
-		}
+        if (!disponibilidade.disponivel()) {
+            throw new IllegalStateException("Itens fora de estoque.");
+        }
 
-		BigDecimal custoTotal = calcularCustoTotal(carrinho);
+        BigDecimal custoTotal = calcularCustoTotal(carrinho);
 
-		PagamentoDTO pagamento = pagamentoExternal.autorizarPagamento(cliente.getId(), custoTotal.doubleValue());
+        PagamentoDTO pagamento = pagamentoExternal.autorizarPagamento(cliente.getId(), custoTotal.doubleValue());
 
-		if (!pagamento.autorizado()) {
-			throw new IllegalStateException("Pagamento não autorizado.");
-		}
+        if (!pagamento.autorizado()) {
+            throw new IllegalStateException("Pagamento não autorizado.");
+        }
 
-		EstoqueBaixaDTO baixaDTO = estoqueExternal.darBaixa(produtosIds, produtosQtds);
+        EstoqueBaixaDTO baixaDTO = estoqueExternal.darBaixa(produtosIds, produtosQtds);
 
-		if (!baixaDTO.sucesso()) {
-			pagamentoExternal.cancelarPagamento(cliente.getId(), pagamento.transacaoId());
-			throw new IllegalStateException("Erro ao dar baixa no estoque.");
-		}
+        if (!baixaDTO.sucesso()) {
+            pagamentoExternal.cancelarPagamento(cliente.getId(), pagamento.transacaoId());
+            throw new IllegalStateException("Erro ao dar baixa no estoque.");
+        }
 
-		CompraDTO compraDTO = new CompraDTO(true, pagamento.transacaoId(), "Compra finalizada com sucesso.");
+        CompraDTO compraDTO = new CompraDTO(true, pagamento.transacaoId(), "Compra finalizada com sucesso.");
 
-		return compraDTO;
-	}
+        return compraDTO;
+    }
 
-	public BigDecimal calcularCustoTotal(CarrinhoDeCompras carrinho) {
-		BigDecimal custoItens = carrinho.getItens()
-				.stream()
-				.map(i -> i.getProduto().getPreco().multiply(BigDecimal.valueOf(i.getQuantidade())))
-				.reduce(BigDecimal.ZERO, BigDecimal::add);
+    public BigDecimal calcularCustoTotal(CarrinhoDeCompras carrinho) {
+        BigDecimal custoItens = carrinho.getItens()
+                .stream()
+                .map(i -> {
+                    if (i.getProduto() == null) {
+                        throw new ProdutoNaoEncontradoException();
+                    }
 
-		if (custoItens.compareTo(BigDecimal.valueOf(1000)) > 0) {
-			custoItens = custoItens.multiply(BigDecimal.valueOf(0.8));
-		} else if (custoItens.compareTo(BigDecimal.valueOf(500)) > 0) {
-			custoItens = custoItens.multiply(BigDecimal.valueOf(0.9));
-		}
+                    return i.getProduto().getPreco().multiply(BigDecimal.valueOf(i.getQuantidade()));
+                })
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
 
-		Integer pesoTotal = carrinho.getItens()
-				.stream()
-				.map(i -> i.getProduto().getPeso())
-				.reduce(0, Integer::sum);
+        if (custoItens.compareTo(BigDecimal.valueOf(1000)) > 0) {
+            custoItens = custoItens.multiply(BigDecimal.valueOf(0.8));
+        } else if (custoItens.compareTo(BigDecimal.valueOf(500)) > 0) {
+            custoItens = custoItens.multiply(BigDecimal.valueOf(0.9));
+        }
 
-		BigDecimal frete = BigDecimal.ZERO;
+        Integer pesoTotal = carrinho.getItens()
+                .stream()
+                .map(i -> i.getProduto().getPeso())
+                .reduce(0, Integer::sum);
 
-		if (pesoTotal > 50) {
-			frete = BigDecimal.valueOf(7).multiply(BigDecimal.valueOf(pesoTotal));
-		} else if (pesoTotal > 10) {
-			frete = BigDecimal.valueOf(4).multiply(BigDecimal.valueOf(pesoTotal));
-		} else if (pesoTotal > 5) {
-			frete = BigDecimal.valueOf(2).multiply(BigDecimal.valueOf(pesoTotal));
-		}
+        BigDecimal frete = BigDecimal.ZERO;
 
-		TipoCliente tipoCliente = carrinho.getCliente().getTipo();
+        if (pesoTotal > 50) {
+            frete = BigDecimal.valueOf(7).multiply(BigDecimal.valueOf(pesoTotal));
+        } else if (pesoTotal > 10) {
+            frete = BigDecimal.valueOf(4).multiply(BigDecimal.valueOf(pesoTotal));
+        } else if (pesoTotal > 5) {
+            frete = BigDecimal.valueOf(2).multiply(BigDecimal.valueOf(pesoTotal));
+        }
 
-		if (tipoCliente.equals(TipoCliente.OURO)) {
-			frete = BigDecimal.ZERO;
-		} else if (tipoCliente.equals(TipoCliente.PRATA)) {
-			frete = frete.multiply(BigDecimal.valueOf(0.5));
-		}
+        TipoCliente tipoCliente = carrinho.getCliente().getTipo();
 
-		return custoItens.add(frete);
-	}
+        if (tipoCliente.equals(TipoCliente.OURO)) {
+            frete = BigDecimal.ZERO;
+        } else if (tipoCliente.equals(TipoCliente.PRATA)) {
+            frete = frete.multiply(BigDecimal.valueOf(0.5));
+        }
+
+        return custoItens.add(frete);
+    }
 }
